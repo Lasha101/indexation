@@ -1,7 +1,7 @@
 import uvicorn
 from fastapi import FastAPI, Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select, delete, func, and_
+from sqlalchemy import select, delete, func, and_, insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 from typing import Annotated, List, Optional
@@ -96,7 +96,7 @@ async def get_posts(
     if start_date:
         query = query.where(Post.created_at >= start_date)
 
-    if start_date:
+    if end_date:
         query = query.where(Post.created_at <= end_date)
 
 
@@ -110,6 +110,35 @@ async def get_posts(
         posts.append(post)
 
     return posts
+
+@app.put("/posts/{post_id}", response_model=PostResponse)
+async def update_post(
+    post_id: int,
+    post_update: PostUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(select(Post).where(Post.id == post_id))
+    post = result.scalar_one_or_none()
+
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    if post_update.title is not None or post_update.content is not None:
+        if post.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to update this post")
+        
+        if post_update.title is not None:
+            post.title = post_update.title
+        if post_update.content is not None:
+            post.content = post_update.content
+
+    await db.commit()
+    await db.refresh(post)
+    
+    likes_count = await db.scalar(select(func.count()).select_from(likes_table).where(likes_table.c.post_id == post_id))
+    post.likes_count = likes_count
+    return post
 
 @app.get("/posts/{post_id}", response_model=PostResponse)
 async def get_post(post_id: int, db: AsyncSession =  Depends(get_db)):
@@ -128,7 +157,7 @@ async def get_post(post_id: int, db: AsyncSession =  Depends(get_db)):
     return post
 
 
-@app.get("/posts/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/posts/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_post(
     post_id: int,
     current_user: User = Depends(get_current_user), 
@@ -143,12 +172,10 @@ async def delete_post(
     if post.user_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Notauthorized to delete this post"
+            detail="Not authorized to delete this post"
         )
     
     await db.delete(post)
     await db.commit()
 
     return None
-
-
