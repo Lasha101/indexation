@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from typing import Annotated, List, Optional
 from datetime import datetime
 
-
 from database import Base, engine, get_db
 from schemas import UserCreate, UserResponse, Token, PostCreate, PostResponse, PostUpdate
 from models import User, Post, likes_table
@@ -15,13 +14,11 @@ from auth import verify_password, get_password_hash, create_access_token, get_cu
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-   
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield 
 
 app = FastAPI(lifespan=lifespan)
-
 
 @app.post("/register", response_model=UserResponse)
 async def register_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
@@ -72,7 +69,8 @@ async def create_post(
     await db.commit()
     await db.refresh(new_post)
 
-    new_post.likes_count = 0
+    # FIXED: Using setattr to avoid Pylance attribute errors
+    setattr(new_post, "likes_count", 0)
     return new_post
 
 
@@ -85,7 +83,7 @@ async def get_posts(
     start_date: Optional[datetime] = None, 
     end_date: Optional[datetime] = None,
 ):
-    likes_subquery = select(func.count()).select_from(likes_table).where(\
+    likes_subquery = select(func.count()).select_from(likes_table).where(
         likes_table.c.post_id == Post.id).scalar_subquery()
 
     query = select(Post, likes_subquery.label("likes_count"))
@@ -99,14 +97,14 @@ async def get_posts(
     if end_date:
         query = query.where(Post.created_at <= end_date)
 
-
     query = query.limit(limit).offset(skip).order_by(Post.created_at.desc())
 
     result = await db.execute(query)
     posts = []
 
     for post, count in result.all():
-        post.likes_count = count
+        # FIXED: Using setattr to avoid Pylance attribute errors
+        setattr(post, "likes_count", count)
         posts.append(post)
 
     return posts
@@ -137,12 +135,14 @@ async def update_post(
     await db.refresh(post)
     
     likes_count = await db.scalar(select(func.count()).select_from(likes_table).where(likes_table.c.post_id == post_id))
-    post.likes_count = likes_count
+    
+    # FIXED: Using setattr to avoid Pylance attribute errors
+    setattr(post, "likes_count", likes_count)
     return post
 
 @app.get("/posts/{post_id}", response_model=PostResponse)
 async def get_post(post_id: int, db: AsyncSession =  Depends(get_db)):
-    likes_subquery = select(func.count()).select_from(likes_table).where(\
+    likes_subquery = select(func.count()).select_from(likes_table).where(
         likes_table.c.post_id == Post.id).scalar_subquery()
     
     query = select(Post, likes_subquery.label("likes_count")).where(Post.id == post_id)
@@ -151,8 +151,11 @@ async def get_post(post_id: int, db: AsyncSession =  Depends(get_db)):
 
     if not row:
         raise HTTPException(status_code=404, detail="Post not found")
+    
     post, likes_count = row
-    post.likes_count = likes_count 
+    
+    # FIXED: Using setattr to avoid Pylance attribute errors
+    setattr(post, "likes_count", likes_count)
 
     return post
 

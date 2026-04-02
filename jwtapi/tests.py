@@ -3,8 +3,7 @@ import pytest_asyncio
 from fastapi.testclient import TestClient
 
 from sqlalchemy import StaticPool, insert, select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from typing import AsyncGenerator
 from datetime import datetime, timedelta, timezone
 import jwt
@@ -16,18 +15,20 @@ from auth import get_password_hash, verify_password
 from auth import create_access_token, get_current_user
 from models import User, likes_table
 
-
-
-SQLACHEMY_DATABASE_URL = "sqlite+aiosqlite:///:memory"
+SQLACHEMY_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 engine = create_async_engine(
     SQLACHEMY_DATABASE_URL,
-    connect_args = {"check_same_thread": False},
+    connect_args={"check_same_thread": False},
     poolclass=StaticPool, 
 )
 
-
-TestingSessionLocal = sessionmaker(
-    autocommit=False, autoflush=False, bind=engine, class_=AsyncSession
+# FIXED: Replaced sessionmaker with async_sessionmaker
+TestingSessionLocal = async_sessionmaker(
+    bind=engine, 
+    class_=AsyncSession,
+    autocommit=False, 
+    autoflush=False, 
+    expire_on_commit=False
 )
 
 async def override_get_db() -> AsyncGenerator:
@@ -67,7 +68,6 @@ def auth_headers(client: TestClient, registered_user):
     assert response.status_code == 200
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
-
 
 
 # unit tests
@@ -119,14 +119,12 @@ async def test_get_current_user(db_session: AsyncSession):
     assert excinfo.value.status_code == 401
 
 
-
 # Integration & API testing 
 
 def test_login(client: TestClient, registered_user):
     response = client.post("/token", data=registered_user)
     assert response.status_code == 200
 
-    
     data = response.json()
     assert "access_token" in data
     assert data["token_type"] == "bearer"
@@ -135,12 +133,12 @@ def test_login(client: TestClient, registered_user):
     assert response.status_code == 401
 
 
-
 def test_read_users_me(client: TestClient, auth_headers, registered_user):
     response = client.get("/users/me", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
     assert data["email"] == registered_user["username"]
+
 
 def test_create_and_get_post(client: TestClient, auth_headers):
     post_data = {"title": "Test Post", "content": "This is a test post."}
@@ -162,8 +160,6 @@ def test_create_and_get_post(client: TestClient, auth_headers):
     posts_list = response.json()
     assert len(posts_list) == 1
     assert posts_list[0] == created_post
-
-
 
 
 def test_delete_post(client: TestClient, auth_headers):
