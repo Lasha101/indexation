@@ -10,3 +10,6 @@ __pycache__/
 # Local database/temporary files
 :memory
 *.sqlite3
+
+# Environement variables
+.env
